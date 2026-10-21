@@ -531,12 +531,16 @@ func parseTomlStrings(v string) []string {
 	return out
 }
 
+func isHooked(agent string) bool {
+	data, err := os.ReadFile(agentFile(agent))
+	return err == nil && strings.Contains(string(data), "agent-ping") && strings.Contains(string(data), "hook")
+}
+
 func hookedAgents() []string {
 	var out []string
 	for _, a := range allAgents {
-		data, err := os.ReadFile(agentFile(a))
-		if err == nil && strings.Contains(string(data), "agent-ping") && strings.Contains(string(data), "hook") {
-			out = append(out, agentNames[a])
+		if isHooked(a) {
+			out = append(out, a)
 		}
 	}
 	return out
