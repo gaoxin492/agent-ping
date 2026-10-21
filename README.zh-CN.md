@@ -40,7 +40,7 @@ irm https://raw.githubusercontent.com/gaoxin492/agent-ping/main/install.ps1 | ie
    agent-ping test
    ```
 
-通知里有项目文件夹名，能看出是哪个项目跑完了。
+通知里有项目文件夹名；再用 `agent-ping set machine 名字` 给每台电脑起个名，就能分清是哪台电脑、哪个项目。
 
 ### Windows + WSL
 
@@ -70,14 +70,26 @@ agent-ping 只管**和它装在同一边**的 agent：
 
 ## 支持的 Agent
 
-| Agent | 什么时候提醒 |
-|---|---|
-| Claude Code | 回复完成，或请求权限时 |
-| Codex CLI | 一轮任务完成 |
-| Cursor | agent 停下（或出错） |
-| Gemini CLI | 回复完成，或请求权限时 |
-| Hermes | 一轮任务完成，或要你批准命令时（CLI / TUI / 桌面版；Telegram 等网关里的对话不提醒） |
-| 其他任何工具 | `agent-ping run -- 命令`，命令结束时提醒 |
+三种提醒：**✅ 完成了**、**⏳ 需要你确认**（批准命令或权限）、**❓ 在问你问题**（让你选择或回答）。
+
+| Agent | ✅ 完成 | ⏳ 需要你确认 | ❓ 在问你问题 |
+|---|---|---|---|
+| Claude Code | ✅ | ✅ | ✅ 选项提问（AskUserQuestion）、MCP 表单 |
+| Codex | ✅ | 见下方说明 | request_user_input（已接上，未实测） |
+| Cursor | ✅（含出错） | — | — |
+| Gemini CLI | ✅ | ✅ | — |
+| Hermes | ✅ | ✅ | ✅ clarify 提问 |
+| 其他任何工具 | `agent-ping run -- 命令`，命令结束时提醒 | | |
+
+**在哪里用都行：** 同一份 hook 对这些入口都有效，下面这些都实测过——
+终端里的 Claude Code / Codex / Hermes、**Claude 桌面版**、**VS Code 的 Claude Code 插件**、**VS Code 的 Codex 插件**、**ChatGPT 桌面版里的 Codex**。
+网页版聊天（claude.ai、chatgpt.com）和 ChatGPT 普通聊天没有开放 hook，无法提醒。
+
+**Codex 说明：** 「完成」用 Codex 的 `notify`，所有版本、所有入口都会调用。
+开始时间、批准、提问用 Codex 新的 hook（`~/.codex/hooks.json`）。Codex 要求先信任 hook 才会运行，agent-ping 安装时会自动写好信任记录，不用你在 `/hooks` 里点。
+「需要你确认」依赖 Codex 在请求批准时调用 `PermissionRequest`：在 Codex 0.162（alpha）上实测还没有触发，更新到更新的版本后会自动生效。
+
+**Hermes 说明：** 只给默认配置（`~/.hermes`）加 hook；如果你用 `hermes profile` 建了多套配置，其他 profile 不提醒。Telegram 等网关、定时任务、子 agent 里的对话也不提醒。
 
 `agent-ping install claude` 只给一个 agent 加 hook。`agent-ping status` 查看当前状态。
 
@@ -99,9 +111,12 @@ agent-ping status              # 看哪些开着、哪些关着
 agent-ping set min_seconds 30     # 短任务不提醒
 agent-ping set idle 60            # 你在用电脑时不提醒
 agent-ping set include_text true  # 通知里带上回复开头
-agent-ping set approval false     # 请求权限时不提醒
-agent-ping set lang en            # English
+agent-ping set approval false     # 请求权限、提问时不提醒
+agent-ping set machine 公司电脑   # 通知里写上电脑名（多台电脑时分得清）；"-" 去掉
+agent-ping set lang en            # 通知改成英文（安装时第一个问题就是选语言）
 ```
+
+通知里的「项目」是 agent 当时所在的文件夹名，例如在 `~/code/my-app` 里跑就显示「项目：my-app」。
 
 ## 卸载
 
