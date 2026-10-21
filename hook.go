@@ -46,6 +46,9 @@ func runHook(args []string) {
 		data, _ := io.ReadAll(io.LimitReader(os.Stdin, 8<<20))
 		json.Unmarshal(data, &payload)
 	}
+	if agent == "hermes" && !hermesPayload(payload) {
+		return
+	}
 	cfg, _ := loadConfig()
 
 	switch event {
@@ -59,6 +62,38 @@ func runHook(args []string) {
 	case "notify":
 		approval(cfg, agent, payload)
 	}
+}
+
+// hermesPayload lifts Hermes' event fields out of "extra" and maps its outcome flags to our
+// status. It returns false for turns you already watch elsewhere: chat gateways (Telegram,
+// Slack…), cron, subagents, and approvals decided by the model without asking you.
+func hermesPayload(p map[string]any) bool {
+	if extra, ok := p["extra"].(map[string]any); ok {
+		for k, v := range extra {
+			if _, ok := p[k]; !ok {
+				p[k] = v
+			}
+		}
+	}
+	switch str(p, "platform") {
+	case "", "cli", "tui", "desktop":
+	default:
+		return false
+	}
+	if str(p, "surface") == "smart" {
+		return false
+	}
+	if p["interrupted"] == true {
+		p["status"] = "aborted"
+	} else if p["failed"] == true {
+		p["status"] = "error"
+	}
+	if str(p, "message") == "" {
+		if d := str(p, "description"); d != "" {
+			p["message"] = d
+		}
+	}
+	return true
 }
 
 func str(p map[string]any, keys ...string) string {

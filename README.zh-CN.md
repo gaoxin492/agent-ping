@@ -2,7 +2,7 @@
 
 AI 编程助手跑完任务、或者需要你确认时，手机（和手表）会震一下。
 
-支持 **Claude Code、Codex、Cursor、Gemini CLI**，其他任何命令也可以用 `agent-ping run`。
+支持 **Claude Code、Codex、Cursor、Gemini CLI、Hermes**，其他任何命令也可以用 `agent-ping run`。
 手表上不用装任何东西：Apple Watch 和大多数手环本来就会同步手机通知。
 
 **目录：** [安装](#安装) · [手机 App](#手机-app) · [支持的 Agent](#支持的-agent) · [设置](#设置) · [卸载](#卸载) · [隐私](#隐私)
@@ -44,6 +44,7 @@ irm https://raw.githubusercontent.com/gaoxin492/agent-ping/main/install.ps1 | ie
 | Codex CLI | 一轮任务完成 |
 | Cursor | agent 停下（或出错） |
 | Gemini CLI | 回复完成，或请求权限时 |
+| Hermes | 一轮任务完成，或要你批准命令时（CLI / TUI / 桌面版；Telegram 等网关里的对话不提醒） |
 | 其他任何工具 | `agent-ping run -- 命令`，命令结束时提醒 |
 
 `agent-ping install claude` 只给一个 agent 加 hook。`agent-ping status` 查看当前状态。

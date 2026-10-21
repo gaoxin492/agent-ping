@@ -65,4 +65,5 @@ var agentNames = map[string]string{
 	"codex":  "Codex",
 	"cursor": "Cursor",
 	"gemini": "Gemini CLI",
+	"hermes": "Hermes",
 }

@@ -2,7 +2,7 @@
 
 Your phone (and watch) buzzes when an AI coding agent finishes or needs your OK.
 
-Works with **Claude Code, Codex, Cursor, Gemini CLI** — and any command via `agent-ping run`.
+Works with **Claude Code, Codex, Cursor, Gemini CLI, Hermes** — and any command via `agent-ping run`.
 Nothing to install on the watch: Apple Watch and most fitness bands already mirror phone notifications.
 
 [中文说明](README.zh-CN.md)
@@ -46,6 +46,7 @@ Switch anytime: `agent-ping use bark https://api.day.app/YOURKEY`
 | Codex CLI | a turn is done |
 | Cursor | the agent stops (or errors) |
 | Gemini CLI | a reply is done, or it asks for permission |
+| Hermes | a turn is done, or it asks you to approve a command (CLI / TUI / desktop; not Telegram & other gateways) |
 | Anything else | `agent-ping run -- <command>` pings when the command ends |
 
 `agent-ping install claude` hooks just one agent. `agent-ping status` shows what's hooked.

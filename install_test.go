@@ -105,3 +105,116 @@ func TestParseBark(t *testing.T) {
 		t.Fatalf("%v %v", c, err)
 	}
 }
+
+func TestHermesYaml(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("AGENT_PING_HOME", dir)
+	t.Setenv("HERMES_HOME", dir)
+	path := filepath.Join(dir, "config.yaml")
+	cfg, _ := loadConfig()
+	cases := map[string]string{
+		"no hooks":     "model:\n  default: opus\n# trailing comment\n",
+		"empty file":   "",
+		"user hooks":   "model: x\nhooks:\n    post_tool_call:\n        - matcher: \"write_file\"\n          command: \"~/fmt.sh\"\n    outbound:\n        - url: https://x\nhooks_auto_accept: false\n",
+		"hooks at end": "a: 1\n\nhooks:\n  post_llm_call:\n    - command: \"log.sh\"\n",
+	}
+	for name, orig := range cases {
+		os.WriteFile(path, []byte(orig), 0o600)
+		os.Remove(path + ".agent-ping.bak")
+		for i := 0; i < 2; i++ { // installing twice must not duplicate
+			if err := installHermes(cfg, path, "/Users/me/My Tools/agent-ping"); err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+		}
+		got, _ := os.ReadFile(path)
+		for _, e := range hermesEvents {
+			want := e[0] + ":\n"
+			if strings.Count(string(got), want) != 1 || strings.Count(string(got), "hook "+e[1]) != 1 {
+				t.Fatalf("%s: want one %s entry:\n%s", name, e[0], got)
+			}
+		}
+		if !strings.Contains(string(got), `- command: "\"/Users/me/My Tools/agent-ping\" hook hermes-stop"`) {
+			t.Fatalf("%s: bad quoting:\n%s", name, got)
+		}
+		if strings.Count(string(got), "hooks:") != 1 {
+			t.Fatalf("%s: duplicate hooks key:\n%s", name, got)
+		}
+		if name == "user hooks" && !strings.Contains(string(got), "hooks:\n    pre_llm_call:\n      - command:") {
+			t.Fatalf("should match the block's indent:\n%s", got)
+		}
+		if err := uninstallHermes(path); err != nil {
+			t.Fatal(err)
+		}
+		got, _ = os.ReadFile(path)
+		if string(got) != orig && !(orig == "" && string(got) == "") {
+			t.Fatalf("%s: uninstall should restore:\n%q\nvs\n%q", name, got, orig)
+		}
+	}
+
+	allow, _ := readJSON(hermesAllowlist())
+	if list, _ := allow["approvals"].([]any); len(list) != 0 {
+		t.Fatalf("allowlist should be clean after uninstall: %v", allow)
+	}
+}
+
+func TestHermesAllowlistKeepsOthers(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HERMES_HOME", dir)
+	os.WriteFile(hermesAllowlist(), []byte(`{"approvals":[{"event":"post_tool_call","command":"~/fmt.sh"}]}`), 0o600)
+	approveHermes(exe)
+	approveHermes(exe)
+	root, _ := readJSON(hermesAllowlist())
+	list := root["approvals"].([]any)
+	if len(list) != 1+len(hermesEvents) {
+		t.Fatalf("want user entry + ours once: %v", list)
+	}
+	approveHermes("")
+	root, _ = readJSON(hermesAllowlist())
+	if list := root["approvals"].([]any); len(list) != 1 || list[0].(map[string]any)["command"] != "~/fmt.sh" {
+		t.Fatalf("should keep only the user's entry: %v", list)
+	}
+}
+
+func TestHermesYamlConflict(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HERMES_HOME", dir)
+	path := filepath.Join(dir, "config.yaml")
+	orig := "hooks:\n  on_session_end:\n    - command: \"mine.sh\"\n"
+	os.WriteFile(path, []byte(orig), 0o600)
+	cfg, _ := loadConfig()
+	if err := installHermes(cfg, path, exe); err == nil {
+		t.Fatal("should refuse to touch an event the user already hooks")
+	}
+	if got, _ := os.ReadFile(path); string(got) != orig {
+		t.Fatalf("file must be untouched:\n%s", got)
+	}
+	os.WriteFile(path, []byte("hooks: {}\n"), 0o600)
+	if err := installHermes(cfg, path, exe); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(path); !strings.HasPrefix(string(got), "hooks:\n  pre_llm_call:\n") {
+		t.Fatalf("hooks: {} should become a block:\n%s", got)
+	}
+}
+
+func TestHermesPayload(t *testing.T) {
+	p := map[string]any{}
+	json.Unmarshal([]byte(`{"hook_event_name":"on_session_end","session_id":"s1","cwd":"/w/proj","extra":{"completed":false,"failed":true,"interrupted":false,"platform":"cli"}}`), &p)
+	if !hermesPayload(p) || p["status"] != "error" || sessionKey(p) != "s1" || projectName(p) != "proj" {
+		t.Fatalf("cli turn: %v", p)
+	}
+	p = map[string]any{"extra": map[string]any{"platform": "cli", "interrupted": true}}
+	if !hermesPayload(p) || p["status"] != "aborted" {
+		t.Fatalf("interrupted: %v", p)
+	}
+	if hermesPayload(map[string]any{"extra": map[string]any{"platform": "telegram"}}) {
+		t.Fatal("gateway turns should be skipped")
+	}
+	if hermesPayload(map[string]any{"extra": map[string]any{"surface": "smart"}}) {
+		t.Fatal("smart approvals should be skipped")
+	}
+	p = map[string]any{"extra": map[string]any{"surface": "cli", "description": "delete files", "command": "rm -rf x"}}
+	if !hermesPayload(p) || p["message"] != "delete files" {
+		t.Fatalf("approval message: %v", p)
+	}
+}

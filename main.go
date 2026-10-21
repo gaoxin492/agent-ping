@@ -13,7 +13,7 @@ func usage() {
 
 Usage:
   agent-ping setup                    Guided setup (pick a phone app, test it, install hooks)
-  agent-ping install [agents...]      Add hooks to agents (claude codex cursor gemini). Default: all found
+  agent-ping install [agents...]      Add hooks to agents (claude codex cursor gemini hermes). Default: all found
   agent-ping uninstall [agents...]    Remove the hooks again
   agent-ping test                     Send a test notification
   agent-ping status                   Show settings and which agents are hooked

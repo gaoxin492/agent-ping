@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-var allAgents = []string{"claude", "codex", "cursor", "gemini"}
+var allAgents = []string{"claude", "codex", "cursor", "gemini", "hermes"}
 
 func claudeDir() string {
 	if d := os.Getenv("CLAUDE_CONFIG_DIR"); d != "" {
@@ -39,6 +39,8 @@ func agentFile(agent string) string {
 		return filepath.Join(homeDir(), ".cursor", "hooks.json")
 	case "gemini":
 		return filepath.Join(homeDir(), ".gemini", "settings.json")
+	case "hermes":
+		return filepath.Join(hermesDir(), "config.yaml")
 	}
 	return ""
 }
@@ -47,7 +49,7 @@ func agentFound(agent string) bool {
 	if _, err := os.Stat(filepath.Dir(agentFile(agent))); err == nil {
 		return true
 	}
-	bins := map[string][]string{"claude": {"claude"}, "codex": {"codex"}, "cursor": {"cursor", "cursor-agent"}, "gemini": {"gemini"}}
+	bins := map[string][]string{"claude": {"claude"}, "codex": {"codex"}, "cursor": {"cursor", "cursor-agent"}, "gemini": {"gemini"}, "hermes": {"hermes"}}
 	for _, b := range bins[agent] {
 		if _, err := exec.LookPath(b); err == nil {
 			return true
@@ -115,7 +117,7 @@ func cmdInstall(args []string) error {
 	}
 	for _, a := range pickAgents(args, true) {
 		if _, ok := agentNames[a]; !ok {
-			fmt.Println(T(cfg, "failed", a, "unknown agent (use: claude codex cursor gemini)"))
+			fmt.Println(T(cfg, "failed", a, "unknown agent (use: claude codex cursor gemini hermes)"))
 			continue
 		}
 		if err := installAgent(cfg, a, exe); err != nil {
@@ -151,8 +153,11 @@ var cursorEvents = [][2]string{{"beforeSubmitPrompt", "cursor-start"}, {"stop", 
 
 func installAgent(cfg *Config, agent, exe string) error {
 	path := agentFile(agent)
-	if agent == "codex" {
+	switch agent {
+	case "codex":
 		return installCodex(cfg, path, exe)
+	case "hermes":
+		return installHermes(cfg, path, exe)
 	}
 	root, err := readJSON(path)
 	if err != nil {
@@ -180,8 +185,11 @@ func installAgent(cfg *Config, agent, exe string) error {
 
 func uninstallAgent(cfg *Config, agent string) error {
 	path := agentFile(agent)
-	if agent == "codex" {
+	switch agent {
+	case "codex":
 		return uninstallCodex(cfg, path)
+	case "hermes":
+		return uninstallHermes(path)
 	}
 	root, err := readJSON(path)
 	if err != nil {
