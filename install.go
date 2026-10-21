@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,7 +10,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 )
 
@@ -146,16 +149,25 @@ func cmdUninstall(args []string) error {
 	return nil
 }
 
-// Events we hook per agent: event name -> our hook kind.
-var claudeEvents = [][2]string{{"UserPromptSubmit", "claude-start"}, {"Stop", "claude-stop"}, {"Notification", "claude-notify"}}
-var geminiEvents = [][2]string{{"BeforeAgent", "gemini-start"}, {"AfterAgent", "gemini-stop"}, {"Notification", "gemini-notify"}}
+// Events we hook per agent: {event name, our hook kind, tool matcher (optional)}.
+var claudeEvents = [][3]string{{"UserPromptSubmit", "claude-start"}, {"Stop", "claude-stop"}, {"Notification", "claude-notify"},
+	{"PreToolUse", "claude-ask", "^AskUserQuestion$"}}
+var geminiEvents = [][3]string{{"BeforeAgent", "gemini-start"}, {"AfterAgent", "gemini-stop"}, {"Notification", "gemini-notify"}}
+
+// Codex's newer hooks (~/.codex/hooks.json) add what notify can't: a start time, approvals and
+// questions. Turn completion stays on notify, which every Codex version and app calls.
+var codexHookEvents = [][3]string{{"UserPromptSubmit", "codex-start"}, {"PermissionRequest", "codex-notify"},
+	{"PreToolUse", "codex-ask", "^request_user_input$"}}
 var cursorEvents = [][2]string{{"beforeSubmitPrompt", "cursor-start"}, {"stop", "cursor-stop"}}
 
 func installAgent(cfg *Config, agent, exe string) error {
 	path := agentFile(agent)
 	switch agent {
 	case "codex":
-		return installCodex(cfg, path, exe)
+		if err := installCodex(cfg, path, exe); err != nil {
+			return err
+		}
+		return installCodexHooks(cfg, exe)
 	case "hermes":
 		return installHermes(cfg, path, exe)
 	}
@@ -166,11 +178,11 @@ func installAgent(cfg *Config, agent, exe string) error {
 	switch agent {
 	case "claude":
 		for _, e := range claudeEvents {
-			addNested(root, e[0], hookCmd(exe, e[1], true))
+			addNested(root, e[0], e[2], hookCmd(exe, e[1], true))
 		}
 	case "gemini":
 		for _, e := range geminiEvents {
-			addNested(root, e[0], hookCmd(exe, e[1], false))
+			addNested(root, e[0], e[2], hookCmd(exe, e[1], false))
 		}
 	case "cursor":
 		if _, ok := root["version"]; !ok {
@@ -187,7 +199,10 @@ func uninstallAgent(cfg *Config, agent string) error {
 	path := agentFile(agent)
 	switch agent {
 	case "codex":
-		return uninstallCodex(cfg, path)
+		if err := uninstallCodex(cfg, path); err != nil {
+			return err
+		}
+		return uninstallCodexHooks()
 	case "hermes":
 		return uninstallHermes(path)
 	}
@@ -266,14 +281,16 @@ func hooksMap(root map[string]any) map[string]any {
 	return h
 }
 
-// Claude / Gemini shape: hooks.Event = [ {matcher?, hooks: [ {type, command} ]} ]
-func addNested(root map[string]any, event, cmd string) {
+// Claude / Gemini / Codex shape: hooks.Event = [ {matcher?, hooks: [ {type, command} ]} ]
+func addNested(root map[string]any, event, matcher, cmd string) {
 	removeNested(root, event)
 	h := hooksMap(root)
 	list, _ := h[event].([]any)
-	h[event] = append(list, map[string]any{
-		"hooks": []any{map[string]any{"type": "command", "command": cmd}},
-	})
+	group := map[string]any{"hooks": []any{map[string]any{"type": "command", "command": cmd}}}
+	if matcher != "" {
+		group["matcher"] = matcher
+	}
+	h[event] = append(list, group)
 }
 
 func removeNested(root map[string]any, event string) {
@@ -393,12 +410,180 @@ func uninstallCodex(cfg *Config, path string) error {
 	return writeKeepMode(path, []byte(text))
 }
 
+func codexHooksFile() string { return filepath.Join(codexDir(), "hooks.json") }
+
+func installCodexHooks(cfg *Config, exe string) error {
+	path := codexHooksFile()
+	root, err := readJSON(path)
+	if err != nil {
+		return err
+	}
+	for _, e := range codexHookEvents {
+		addNested(root, e[0], e[2], hookCmd(exe, e[1], false))
+	}
+	if err := writeJSON(path, root); err != nil {
+		return err
+	}
+	return trustCodexHooks(root)
+}
+
+func uninstallCodexHooks() error {
+	path := codexHooksFile()
+	if _, err := os.Stat(path); err != nil {
+		return nil
+	}
+	root, err := readJSON(path)
+	if err != nil {
+		return err
+	}
+	if err := untrustCodexHooks(root); err != nil {
+		return err
+	}
+	hooks, _ := root["hooks"].(map[string]any)
+	for ev := range hooks {
+		removeNested(root, ev)
+	}
+	if len(root) == 0 { // nothing but ours was in there
+		return os.Remove(path)
+	}
+	return writeJSON(path, root)
+}
+
+// Codex runs a hooks.json entry only after you trust it (its /hooks screen), recorded in
+// config.toml as [hooks.state."<file>:<event>:<group>:<handler>"] trusted_hash = "sha256:…".
+// Installing is that consent, so we write the same record Codex would.
+
+// codexEventKey turns "PreToolUse" into Codex's "pre_tool_use".
+func codexEventKey(event string) string {
+	var b strings.Builder
+	for i, r := range event {
+		if r >= 'A' && r <= 'Z' {
+			if i > 0 {
+				b.WriteByte('_')
+			}
+			r += 'a' - 'A'
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// codexHookHash mirrors codex-rs hook_hash: sha256 over the sorted, compact JSON of the
+// normalized identity (default timeout 600, async false).
+func codexHookHash(event, matcher, cmd string) string {
+	ident := map[string]any{
+		"event_name": codexEventKey(event),
+		"hooks":      []any{map[string]any{"type": "command", "command": cmd, "timeout": 600, "async": false}},
+	}
+	if matcher != "" {
+		ident["matcher"] = matcher
+	}
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false) // serde_json doesn't escape <>&
+	enc.Encode(ident)
+	return fmt.Sprintf("sha256:%x", sha256.Sum256(bytes.TrimSpace(buf.Bytes())))
+}
+
+type codexTrust struct{ key, hash string }
+
+// ourCodexTrust lists the state key and hash of every agent-ping hook in a hooks.json root.
+func ourCodexTrust(root map[string]any) []codexTrust {
+	var out []codexTrust
+	hooks, _ := root["hooks"].(map[string]any)
+	for ev, v := range hooks {
+		groups, _ := v.([]any)
+		for gi, g := range groups {
+			gm, _ := g.(map[string]any)
+			matcher, _ := gm["matcher"].(string)
+			inner, _ := gm["hooks"].([]any)
+			for hi, x := range inner {
+				xm, _ := x.(map[string]any)
+				cmd := fmt.Sprint(xm["command"])
+				if !isOurs(cmd) {
+					continue
+				}
+				key := fmt.Sprintf("%s:%s:%d:%d", codexHooksFile(), codexEventKey(ev), gi, hi)
+				out = append(out, codexTrust{key, codexHookHash(ev, matcher, cmd)})
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].key < out[j].key })
+	return out
+}
+
+func trustCodexHooks(root map[string]any) error {
+	if err := untrustCodexHooks(root); err != nil {
+		return err
+	}
+	path := agentFile("codex")
+	data, _ := os.ReadFile(path)
+	text := string(data)
+	if text != "" && !strings.HasSuffix(text, "\n") {
+		text += "\n"
+	}
+	for _, t := range ourCodexTrust(root) {
+		text += "\n[hooks.state." + tomlString(t.key) + "]\ntrusted_hash = " + tomlString(t.hash) + "\n"
+	}
+	backup(path)
+	return writeKeepMode(path, []byte(text))
+}
+
+// untrustCodexHooks drops the trust records of our hooks (matched by hash, so a moved index is fine).
+func untrustCodexHooks(root map[string]any) error {
+	ours := map[string]bool{}
+	for _, t := range ourCodexTrust(root) {
+		ours[t.hash] = true
+	}
+	path := agentFile("codex")
+	data, err := os.ReadFile(path)
+	if err != nil || len(ours) == 0 {
+		return nil
+	}
+	lines := strings.Split(string(data), "\n")
+	var out []string
+	for i := 0; i < len(lines); i++ {
+		if !strings.HasPrefix(lines[i], "[hooks.state.") {
+			out = append(out, lines[i])
+			continue
+		}
+		j := i + 1
+		for j < len(lines) && !strings.HasPrefix(strings.TrimSpace(lines[j]), "[") {
+			j++
+		}
+		section := strings.Join(lines[i:j], "\n")
+		if m := regexp.MustCompile(`trusted_hash\s*=\s*"([^"]+)"`).FindStringSubmatch(section); m != nil && ours[m[1]] {
+			for len(out) > 0 && strings.TrimSpace(out[len(out)-1]) == "" { // the blank line we put before it
+				out = out[:len(out)-1]
+			}
+			if j < len(lines) {
+				out = append(out, "")
+			}
+			i = j - 1
+			continue
+		}
+		out = append(out, lines[i:j]...)
+		i = j - 1
+	}
+	text := strings.Join(out, "\n")
+	if strings.HasSuffix(string(data), "\n") && !strings.HasSuffix(text, "\n") {
+		text += "\n"
+	}
+	if text == string(data) {
+		return nil
+	}
+	return writeKeepMode(path, []byte(text))
+}
+
+func tomlString(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
+}
+
 func tomlArray(items []string) string {
 	q := make([]string, len(items))
 	for i, s := range items {
-		s = strings.ReplaceAll(s, `\`, `\\`)
-		s = strings.ReplaceAll(s, `"`, `\"`)
-		q[i] = `"` + s + `"`
+		q[i] = tomlString(s)
 	}
 	return "[" + strings.Join(q, ", ") + "]"
 }
