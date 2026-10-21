@@ -42,7 +42,7 @@ Install agent-ping on each computer and give them all **the same topic** (ntfy) 
    agent-ping test
    ```
 
-Each notification names the project folder, so you can tell which job finished.
+Each notification names the project folder; give each computer a name with `agent-ping set machine <name>` and you can tell which machine and which project finished.
 
 ### Windows + WSL
 
@@ -72,14 +72,26 @@ Switch anytime: `agent-ping use bark https://api.day.app/YOURKEY`
 
 ## Agents
 
-| Agent | You get a ping when… |
-|---|---|
-| Claude Code | a reply is done, or it asks for permission |
-| Codex CLI | a turn is done |
-| Cursor | the agent stops (or errors) |
-| Gemini CLI | a reply is done, or it asks for permission |
-| Hermes | a turn is done, or it asks you to approve a command (CLI / TUI / desktop; not Telegram & other gateways) |
-| Anything else | `agent-ping run -- <command>` pings when the command ends |
+Three kinds of ping: **✅ finished**, **⏳ needs your OK** (approve a command or permission), **❓ asking you something** (pick an option or answer).
+
+| Agent | ✅ Finished | ⏳ Needs your OK | ❓ Asking you |
+|---|---|---|---|
+| Claude Code | ✅ | ✅ | ✅ multiple-choice questions (AskUserQuestion), MCP forms |
+| Codex | ✅ | see note below | request_user_input (wired up, not yet tested) |
+| Cursor | ✅ (incl. errors) | — | — |
+| Gemini CLI | ✅ | ✅ | — |
+| Hermes | ✅ | ✅ | ✅ clarify questions |
+| Anything else | `agent-ping run -- <command>` pings when the command ends | | |
+
+**Works wherever you run them.** The same hooks cover all of these, each tested:
+Claude Code / Codex / Hermes in a terminal, the **Claude desktop app**, the **Claude Code extension for VS Code**, the **Codex extension for VS Code**, and **Codex in the ChatGPT desktop app**.
+Web chat (claude.ai, chatgpt.com) and plain ChatGPT chat expose no hooks, so they can't ping.
+
+**Codex note:** "finished" comes from Codex's `notify`, which every version and app calls.
+Start time, approvals and questions use Codex's newer hooks (`~/.codex/hooks.json`). Codex only runs hooks you've trusted; agent-ping writes that trust record when it installs, so there's nothing to click in `/hooks`.
+"Needs your OK" relies on Codex calling `PermissionRequest` before it asks you: on Codex 0.162 (alpha) it doesn't fire yet, and it will start working once Codex does.
+
+**Hermes note:** only the default profile (`~/.hermes`) is hooked — other `hermes profile`s stay quiet — and gateway (Telegram etc.), cron and subagent turns are skipped.
 
 `agent-ping install claude` hooks just one agent. `agent-ping status` shows what's hooked.
 
@@ -101,9 +113,12 @@ agent-ping status              # see what's on / off
 agent-ping set min_seconds 30     # skip quick tasks
 agent-ping set idle 60            # stay quiet while you're at the keyboard
 agent-ping set include_text true  # add the start of the agent's reply
-agent-ping set approval false     # no pings for permission requests
-agent-ping set lang zh            # 中文通知
+agent-ping set approval false     # no pings for permission requests or questions
+agent-ping set machine "Work PC"  # name this computer in every ping ("-" to clear)
+agent-ping set lang zh            # 中文通知 (setup asks for the language first)
 ```
+
+"Project" in a ping is the folder the agent ran in: `~/code/my-app` shows as "Project: my-app".
 
 ## Uninstall
 
