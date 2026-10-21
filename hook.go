@@ -50,6 +50,12 @@ func runHook(args []string) {
 		return
 	}
 	cfg, _ := loadConfig()
+	if cfg.isOff(agent) {
+		if agent == "codex" {
+			runCodexChain(cfg, args[1:])
+		}
+		return
+	}
 
 	switch event {
 	case "start":
