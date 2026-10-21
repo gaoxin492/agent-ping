@@ -218,3 +218,31 @@ func TestHermesPayload(t *testing.T) {
 		t.Fatalf("approval message: %v", p)
 	}
 }
+
+func TestSwitchOnOff(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("AGENT_PING_HOME", dir)
+	t.Setenv("HERMES_HOME", dir)
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/x/agent-ping hook claude-stop"}]}]}}`), 0o600)
+	if err := cmdSwitch(false, []string{"Claude"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ := loadConfig()
+	if !cfg.isOff("claude") || cfg.isOff("hermes") {
+		t.Fatalf("off: %v", cfg.Off)
+	}
+	cmdSwitch(false, []string{"claude"}) // twice must not duplicate
+	if cfg, _ = loadConfig(); len(cfg.Off) != 1 {
+		t.Fatalf("dup: %v", cfg.Off)
+	}
+	if err := cmdSwitch(true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, _ = loadConfig(); len(cfg.Off) != 0 {
+		t.Fatalf("on with no args should clear all: %v", cfg.Off)
+	}
+	if err := cmdSwitch(false, []string{"chatgpt"}); err == nil {
+		t.Fatal("unknown agent should fail")
+	}
+}
