@@ -15,7 +15,9 @@ import (
 // ---- Hermes Agent (config.yaml `hooks:` block + shell-hooks-allowlist.json) ----
 
 // Events we hook in Hermes. pre_llm_call fires once per turn, on_session_end at the end of every turn.
-var hermesEvents = [][2]string{{"pre_llm_call", "hermes-start"}, {"on_session_end", "hermes-stop"}, {"pre_approval_request", "hermes-notify"}}
+// pre_tool_call on the clarify tool means Hermes is asking you a question and waiting.
+var hermesEvents = [][3]string{{"pre_llm_call", "hermes-start"}, {"on_session_end", "hermes-stop"}, {"pre_approval_request", "hermes-notify"},
+	{"pre_tool_call", "hermes-ask", "^clarify$"}}
 
 func hermesDir() string {
 	if d := os.Getenv("HERMES_HOME"); d != "" {
@@ -118,6 +120,9 @@ func installHermes(cfg *Config, path, exe string) error {
 	var ours []string
 	for _, e := range hermesEvents {
 		ours = append(ours, pad+e[0]+":", pad+"  - command: "+yamlQuote(hookCmd(exe, e[1], false)))
+		if e[2] != "" {
+			ours = append(ours, pad+"    matcher: "+yamlQuote(e[2]))
+		}
 	}
 	if start >= 0 {
 		lines = append(lines[:start+1], append(ours, lines[start+1:]...)...)
