@@ -2,6 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -16,7 +19,7 @@ func TestClaudeMergeKeepsUserHooks(t *testing.T) {
 	json.Unmarshal([]byte(`{"model":"opus","hooks":{"Stop":[{"hooks":[{"type":"command","command":"say done"}]}]}}`), &root)
 	for i := 0; i < 2; i++ { // installing twice must not duplicate
 		for _, e := range claudeEvents {
-			addNested(root, e[0], hookCmd(exe, e[1], true))
+			addNested(root, e[0], e[2], hookCmd(exe, e[1], true))
 		}
 	}
 	stop := root["hooks"].(map[string]any)["Stop"].([]any)
@@ -224,6 +227,8 @@ func TestSwitchOnOff(t *testing.T) {
 	t.Setenv("AGENT_PING_HOME", dir)
 	t.Setenv("HERMES_HOME", dir)
 	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	t.Setenv("CODEX_HOME", dir)
+	t.Setenv("HOME", dir)
 	os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/x/agent-ping hook claude-stop"}]}]}}`), 0o600)
 	if err := cmdSwitch(false, []string{"Claude"}); err != nil {
 		t.Fatal(err)
@@ -244,5 +249,141 @@ func TestSwitchOnOff(t *testing.T) {
 	}
 	if err := cmdSwitch(false, []string{"chatgpt"}); err == nil {
 		t.Fatal("unknown agent should fail")
+	}
+}
+
+// captured starts a local webhook and returns a func listing what was pushed to it.
+func captured(t *testing.T, cfg *Config) func() []string {
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var m map[string]any
+		json.NewDecoder(r.Body).Decode(&m)
+		got = append(got, fmt.Sprint(m["title"])+" | "+fmt.Sprint(m["message"]))
+	}))
+	t.Cleanup(srv.Close)
+	cfg.Lang = "en"
+	cfg.Channels = []Channel{{Type: "webhook", URL: srv.URL}}
+	return func() []string { return got }
+}
+
+func TestAskThenPermissionNoticeIsOnePing(t *testing.T) {
+	t.Setenv("AGENT_PING_HOME", t.TempDir())
+	cfg := &Config{}
+	pushed := captured(t, cfg)
+	q := map[string]any{"session_id": "s9", "cwd": "/w/x", "tool_input": map[string]any{}}
+	n := map[string]any{"session_id": "s9", "cwd": "/w/x", "notification_type": "permission_prompt", "message": "Claude needs your permission"}
+	askingYou(cfg, "claude", q)
+	approval(cfg, "claude", n)
+	approval(cfg, "claude", n) // a later real permission prompt still pings
+	if len(pushed()) != 2 || !strings.HasPrefix(pushed()[0], "❓") || !strings.HasPrefix(pushed()[1], "⏳") {
+		t.Fatalf("got %q", pushed())
+	}
+}
+
+func TestApprovalAndAsk(t *testing.T) {
+	t.Setenv("AGENT_PING_HOME", t.TempDir())
+	cfg := &Config{}
+	pushed := captured(t, cfg)
+	p := func(s string) map[string]any { m := map[string]any{}; json.Unmarshal([]byte(s), &m); return m }
+
+	approval(cfg, "claude", p(`{"notification_type":"auth_success","message":"Logged in","cwd":"/w/a"}`))
+	approval(cfg, "claude", p(`{"notification_type":"idle_prompt","message":"Claude is waiting for your input","cwd":"/w/a"}`))
+	if len(pushed()) != 0 {
+		t.Fatalf("auth_success / idle_prompt must not ping: %v", pushed())
+	}
+	approval(cfg, "claude", p(`{"notification_type":"permission_prompt","message":"Claude needs your permission to use Bash","cwd":"/w/a"}`))
+	approval(cfg, "claude", p(`{"notification_type":"elicitation_dialog","message":"Fill in the form","cwd":"/w/a"}`))
+	approval(cfg, "codex", p(`{"hook_event_name":"PermissionRequest","cwd":"/w/b","tool_name":"Bash","tool_input":{"command":"rm -rf x","description":"Delete build output"}}`))
+	askingYou(cfg, "hermes", p(`{"cwd":"/w/c","tool_input":{"question":"Which DB?"}}`))
+	cfg.IncludeText, cfg.Machine = true, "Work PC"
+	askingYou(cfg, "claude", p(`{"cwd":"/w/d","tool_input":{"questions":[{"question":"Pick a color","options":[]}]}}`))
+
+	want := []string{
+		"⏳ Claude Code needs your OK | Project: a\nClaude needs your permission to use Bash",
+		"❓ Claude Code is asking you something | Project: a\nFill in the form",
+		"⏳ Codex needs your OK | Project: b\nDelete build output",
+		"❓ Hermes is asking you something | Project: c",
+		"❓ Claude Code is asking you something | Project: d\nPick a color\nComputer: Work PC",
+	}
+	if !reflect.DeepEqual(pushed(), want) {
+		t.Fatalf("got:\n%q\nwant:\n%q", pushed(), want)
+	}
+	if strings.Contains(strings.Join(pushed(), ""), "rm -rf") {
+		t.Fatal("the raw command must never be pushed")
+	}
+}
+
+func TestCodexHooksJson(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CODEX_HOME", dir)
+	cfg := &Config{}
+	installCodexHooks(cfg, exe)
+	installCodexHooks(cfg, exe)
+	root, _ := readJSON(codexHooksFile())
+	h := root["hooks"].(map[string]any)
+	if len(h) != len(codexHookEvents) || len(h["PreToolUse"].([]any)) != 1 {
+		t.Fatalf("bad hooks.json: %v", h)
+	}
+	if m := h["PreToolUse"].([]any)[0].(map[string]any)["matcher"]; m != "^request_user_input$" {
+		t.Fatalf("matcher: %v", m)
+	}
+	uninstallCodexHooks()
+	if _, err := os.Stat(codexHooksFile()); err == nil {
+		t.Fatal("hooks.json with only our hooks should be removed")
+	}
+	os.WriteFile(codexHooksFile(), []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"say hi"}]}]}}`), 0o600)
+	installCodexHooks(cfg, exe)
+	uninstallCodexHooks()
+	if got, _ := os.ReadFile(codexHooksFile()); !strings.Contains(string(got), "say hi") || strings.Contains(string(got), "agent-ping") {
+		t.Fatalf("user hooks must survive: %s", got)
+	}
+}
+
+func TestCodexTrustHash(t *testing.T) {
+	// Hashes Codex itself wrote after "Trust All" for these exact hooks.
+	cmd := "/Users/xingao/.local/bin/agent-ping hook "
+	cases := [][4]string{
+		{"UserPromptSubmit", "", "codex-start", "sha256:ced22e91a5ff027bd246e42c7453738a18bbe949bc401625cee931a4632ef7e2"},
+		{"PermissionRequest", "", "codex-notify", "sha256:b59d0a52ebd2ba0cf61b9c32c36de3e2448ce87051f157ed4d3151507015df0c"},
+		{"PreToolUse", "^request_user_input$", "codex-ask", "sha256:c486949902fff744e8861278d5f8cce3448ec6933f072c919cbcc9b4fe031a92"},
+	}
+	for _, c := range cases {
+		if got := codexHookHash(c[0], c[1], cmd+c[2]); got != c[3] {
+			t.Errorf("%s: %s", c[0], got)
+		}
+	}
+}
+
+func TestCodexTrustRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CODEX_HOME", dir)
+	path := filepath.Join(dir, "config.toml")
+	orig := "model = \"x\"\n\n[hooks.state.\"/elsewhere/hooks.json:stop:0:0\"]\ntrusted_hash = \"sha256:user\"\n\n[tui]\nnotifications = true\n"
+	os.WriteFile(path, []byte(orig), 0o600)
+	cfg := &Config{}
+	installCodexHooks(cfg, exe)
+	installCodexHooks(cfg, exe) // twice: no duplicate records
+	got, _ := os.ReadFile(path)
+	if n := strings.Count(string(got), "[hooks.state."); n != 1+len(codexHookEvents) {
+		t.Fatalf("want user record + %d of ours, got %d:\n%s", len(codexHookEvents), n, got)
+	}
+	key := `[hooks.state."` + filepath.Join(dir, "hooks.json") + `:pre_tool_use:0:0"]`
+	if !strings.Contains(string(got), key) {
+		t.Fatalf("missing %s:\n%s", key, got)
+	}
+	uninstallCodexHooks()
+	if got, _ := os.ReadFile(path); string(got) != orig {
+		t.Fatalf("uninstall should restore:\n%q\nvs\n%q", got, orig)
+	}
+}
+
+func TestCodexTurnDedupe(t *testing.T) {
+	t.Setenv("AGENT_PING_HOME", t.TempDir())
+	p := map[string]any{"turn-id": "t1"}
+	if !firstForTurn("codex", p) || firstForTurn("codex", p) {
+		t.Fatal("second report of the same turn should be dropped")
+	}
+	if !firstForTurn("codex", map[string]any{}) {
+		t.Fatal("no turn id: always report")
 	}
 }
