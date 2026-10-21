@@ -1,13 +1,35 @@
-# agent-ping
+<p align="center"><img src="assets/logo.jpg" alt="agent-ping" width="360"></p>
 
-Your phone (and watch) buzzes when an AI coding agent finishes or needs your OK.
+<p align="center"><b>Your phone and watch buzz when your AI agent is done — or needs you.</b></p>
 
-Works with **Claude Code, Codex, Cursor, Gemini CLI, Hermes** — and any command via `agent-ping run`.
-Nothing to install on the watch: Apple Watch and most fitness bands already mirror phone notifications.
+<p align="center">
+Claude Code · Codex · Cursor · Gemini CLI · Hermes<br>
+in the terminal, the desktop apps or VS Code · macOS · Linux · Windows · WSL
+</p>
 
-[中文说明](README.zh-CN.md)
+<p align="center"><a href="README.zh-CN.md">中文说明</a></p>
 
-**Contents:** [Install](#install) · [Several computers](#several-computers-one-phone) · [Phone apps](#phone-apps) · [Agents](#agents) · [Settings](#settings) · [Uninstall](#uninstall) · [Privacy](#privacy)
+---
+
+You've got three agents working in parallel. Or you've stepped away from your desk for a coffee.
+You don't want to keep checking the screen. You just want a tap on the wrist when one of them
+**finishes**, or **stops to ask you something** — without wiring up a chat bot, a server or yet another account.
+
+**agent-ping is that tap.** One small binary, one install command, and your phone buzzes when:
+
+- ✅ **an agent finishes** — with the project name and how long it took
+- ⏳ **it needs your OK** to run a command
+- ❓ **it's asking you a question** and waiting for an answer
+
+No bot, no server, no sign-up with the default (free) ntfy app. Nothing to install on the watch —
+Apple Watch and most fitness bands mirror your phone. And nothing of your code or chat leaves the
+machine: a ping only says which agent, which folder, and how long.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/gaoxin492/agent-ping/main/install.sh | sh
+```
+
+**Contents:** [Install](#install) · [Several computers](#several-computers-one-phone) · [Phone apps](#phone-apps) · [Agents](#agents) · [Settings](#settings) · [Not getting pings?](#not-getting-pings) · [Uninstall](#uninstall) · [Privacy](#privacy)
 
 ## Install
 
@@ -78,18 +100,21 @@ Three kinds of ping: **✅ finished**, **⏳ needs your OK** (approve a command 
 |---|---|---|---|
 | Claude Code | ✅ | ✅ | ✅ multiple-choice questions (AskUserQuestion), MCP forms |
 | Codex | ✅ | see note below | request_user_input (wired up, not yet tested) |
-| Cursor | ✅ (incl. errors) | — | — |
-| Gemini CLI | ✅ | ✅ | — |
+| Cursor ¹ | ✅ (incl. errors) | — | — |
+| Gemini CLI ¹ | ✅ | ✅ | — |
 | Hermes | ✅ | ✅ | ✅ clarify questions |
 | Anything else | `agent-ping run -- <command>` pings when the command ends | | |
 
-**Works wherever you run them.** The same hooks cover all of these, each tested:
-Claude Code / Codex / Hermes in a terminal, the **Claude desktop app**, the **Claude Code extension for VS Code**, the **Codex extension for VS Code**, and **Codex in the ChatGPT desktop app**.
+¹ Hooked up from their documented hook formats and covered by unit tests, but not yet tried on a real install — reports welcome.
+
+**Works wherever you run them.** The same hooks cover all of these, each tested on a real machine:
+Claude Code / Codex / Hermes in a terminal, the **Claude desktop app**, the **Claude Code extension for VS Code**, the **Codex extension for VS Code**, and **Codex in the ChatGPT desktop app** — on macOS, Windows and WSL.
 Web chat (claude.ai, chatgpt.com) and plain ChatGPT chat expose no hooks, so they can't ping.
 
 **Codex note:** "finished" comes from Codex's `notify`, which every version and app calls.
 Start time, approvals and questions use Codex's newer hooks (`~/.codex/hooks.json`). Codex only runs hooks you've trusted; agent-ping writes that trust record when it installs, so there's nothing to click in `/hooks`.
 "Needs your OK" relies on Codex calling `PermissionRequest` before it asks you: on Codex 0.162 (alpha) it doesn't fire yet, and it will start working once Codex does.
+The trust record follows Codex's own hashing; if a future Codex changes it, those extra hooks go quiet (Codex shows them as untrusted in `/hooks`) while "finished" pings keep working. Re-running the installer, or trusting them in `/hooks`, fixes it.
 
 **Hermes note:** only the default profile (`~/.hermes`) is hooked — other `hermes profile`s stay quiet — and gateway (Telegram etc.), cron and subagent turns are skipped.
 
@@ -119,6 +144,13 @@ agent-ping set lang zh            # 中文通知 (setup asks for the language fi
 ```
 
 "Project" in a ping is the folder the agent ran in: `~/code/my-app` shows as "Project: my-app".
+
+## Not getting pings?
+
+- **You're at the computer.** If you answered "yes" to *stay quiet while you're using the computer*, nothing comes while you type. Turn it off: `agent-ping set idle 0`.
+- **The watch stays still but the phone buzzes.** That's iOS: notifications go to the watch only while the iPhone is locked. Also check the Watch app → Notifications → your push app is set to *Mirror my iPhone*.
+- **Nothing at all.** Run `agent-ping test`. If that arrives, restart the agent session you're in (hooks load at start), then check `agent-ping status` that the agent is listed under *on*.
+- **ntfy on iPhone feels late.** Bark uses Apple's push directly and is usually more reliable on iOS: `agent-ping use bark https://api.day.app/YOURKEY`.
 
 ## Uninstall
 
