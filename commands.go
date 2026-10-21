@@ -103,13 +103,85 @@ func cmdStatus() error {
 	}
 	fmt.Printf("lang: %s  min_seconds: %d  idle: %d  include_text: %v  approval: %v\n",
 		cfg.Lang, cfg.MinSeconds, cfg.IdleSeconds, cfg.IncludeText, !cfg.SkipApproval)
-	h := hookedAgents()
-	if len(h) == 0 {
+	var on, off []string
+	for _, a := range hookedAgents() {
+		if cfg.isOff(a) {
+			off = append(off, agentNames[a])
+		} else {
+			on = append(on, agentNames[a])
+		}
+	}
+	if len(on)+len(off) == 0 {
 		fmt.Println("hooked: (none) — run: agent-ping install")
-	} else {
-		fmt.Println("hooked:", strings.Join(h, ", "))
+		return nil
+	}
+	fmt.Println("on: ", or(strings.Join(on, ", "), "(none)"))
+	if len(off) > 0 {
+		fmt.Println("off:", strings.Join(off, ", "), " — turn back on: agent-ping on <agent>")
 	}
 	return nil
+}
+
+func (c *Config) isOff(agent string) bool {
+	for _, a := range c.Off {
+		if a == agent {
+			return true
+		}
+	}
+	return false
+}
+
+// cmdSwitch is `agent-ping on|off [agents...]`. Off only mutes (hooks stay), so both take effect
+// at once without restarting the agent. On also hooks an agent that isn't hooked yet.
+// No agents means every hooked agent.
+func cmdSwitch(turnOn bool, args []string) error {
+	cfg, _ := loadConfig()
+	agents := args
+	if len(agents) == 0 {
+		agents = hookedAgents()
+		if turnOn {
+			agents = append(agents, cfg.Off...)
+		}
+	}
+	exe := ""
+	restart := false
+	for _, a := range agents {
+		a = strings.ToLower(a)
+		if _, ok := agentNames[a]; !ok {
+			return fmt.Errorf("unknown agent %q (use: %s)", a, strings.Join(allAgents, " "))
+		}
+		var keep []string
+		for _, x := range cfg.Off {
+			if x != a {
+				keep = append(keep, x)
+			}
+		}
+		cfg.Off = keep
+		if !turnOn {
+			cfg.Off = append(cfg.Off, a)
+			fmt.Println(T(cfg, "switched_off", agentNames[a]))
+			continue
+		}
+		if !isHooked(a) {
+			if exe == "" {
+				var err error
+				if exe, err = exePath(); err != nil {
+					return err
+				}
+			}
+			if err := installAgent(cfg, a, exe); err != nil {
+				fmt.Println(T(cfg, "failed", agentNames[a], err))
+				continue
+			}
+			fmt.Println(T(cfg, "hooked", agentNames[a], agentFile(a)))
+			restart = true
+		}
+		fmt.Println(T(cfg, "switched_on", agentNames[a]))
+	}
+	if restart {
+		fmt.Println(T(cfg, "restart"))
+	}
+	return saveConfig(cfg)
 }
 
 func mask(s string) string {
