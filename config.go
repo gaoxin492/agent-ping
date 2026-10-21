@@ -29,6 +29,7 @@ type Config struct {
 	IncludeText  bool      `json:"include_text"`
 	SkipApproval bool      `json:"skip_approval"`
 	CodexChain   []string  `json:"codex_chain,omitempty"` // a notify program Codex had before us; we still call it
+	Off          []string  `json:"off,omitempty"`         // agents switched off with `agent-ping off`; their hooks stay but stay quiet
 }
 
 func configDir() string {
