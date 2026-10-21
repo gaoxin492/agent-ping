@@ -29,6 +29,7 @@ type Config struct {
 	IncludeText  bool      `json:"include_text"`
 	SkipApproval bool      `json:"skip_approval"`
 	CodexChain   []string  `json:"codex_chain,omitempty"` // a notify program Codex had before us; we still call it
+	Machine      string    `json:"machine,omitempty"`     // shown in every notification, to tell computers apart
 	Off          []string  `json:"off,omitempty"`         // agents switched off with `agent-ping off`; their hooks stay but stay quiet
 }
 
@@ -101,6 +102,9 @@ func detectLang() string {
 }
 
 func stateDir() string {
+	if d := os.Getenv("AGENT_PING_HOME"); d != "" {
+		return filepath.Join(d, "state")
+	}
 	d, err := os.UserCacheDir()
 	if err != nil {
 		d = os.TempDir()
