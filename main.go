@@ -16,7 +16,9 @@ Usage:
   agent-ping install [agents...]      Add hooks to agents (claude codex cursor gemini hermes). Default: all found
   agent-ping uninstall [agents...]    Remove the hooks again
   agent-ping test                     Send a test notification
-  agent-ping status                   Show settings and which agents are hooked
+  agent-ping status                   Show settings and which agents are on / off
+  agent-ping on [agents...]           Turn pings on (hooks the agent if needed). No agents: all
+  agent-ping off [agents...]          Turn pings off, instantly, no restart needed. No agents: all
   agent-ping run -- <command>         Run any command, notify when it ends
   agent-ping send <title> [body]      Send a custom notification
 
@@ -61,6 +63,8 @@ func main() {
 		err = cmdInstall(args)
 	case "uninstall":
 		err = cmdUninstall(args)
+	case "on", "off":
+		err = cmdSwitch(cmd == "on", args)
 	case "test":
 		err = cmdTest()
 	case "send":
