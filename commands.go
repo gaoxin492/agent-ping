@@ -101,8 +101,8 @@ func cmdStatus() error {
 		}
 		fmt.Println("channel:", desc)
 	}
-	fmt.Printf("lang: %s  min_seconds: %d  idle: %d  include_text: %v  approval: %v\n",
-		cfg.Lang, cfg.MinSeconds, cfg.IdleSeconds, cfg.IncludeText, !cfg.SkipApproval)
+	fmt.Printf("lang: %s  min_seconds: %d  idle: %d  include_text: %v  approval: %v  machine: %s\n",
+		cfg.Lang, cfg.MinSeconds, cfg.IdleSeconds, cfg.IncludeText, !cfg.SkipApproval, or(cfg.Machine, "-"))
 	var on, off []string
 	for _, a := range hookedAgents() {
 		if cfg.isOff(a) {
@@ -278,7 +278,7 @@ func cmdUse(args []string) error {
 
 func cmdSet(args []string) error {
 	if len(args) != 2 {
-		return errors.New("usage: agent-ping set <min_seconds|idle|include_text|approval|lang> <value>")
+		return errors.New("usage: agent-ping set <min_seconds|idle|include_text|approval|lang|machine> <value>")
 	}
 	cfg, _ := loadConfig()
 	k, v := args[0], args[1]
@@ -305,6 +305,11 @@ func cmdSet(args []string) error {
 			return berr
 		}
 		cfg.SkipApproval = !b
+	case "machine":
+		if v == "-" || strings.EqualFold(v, "off") {
+			v = ""
+		}
+		cfg.Machine = v
 	case "lang":
 		if v != "en" && v != "zh" {
 			return errors.New("lang must be en or zh")
