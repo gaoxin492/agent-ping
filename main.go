@@ -33,6 +33,7 @@ Usage:
   agent-ping set include_text <true|false>   Add the start of the agent's reply
   agent-ping set approval <true|false>       Notify when an agent waits for your approval
   agent-ping set lang <en|zh>
+  agent-ping set machine <name>       Name this computer in every notification ("-" to clear)
 `)
 }
 
