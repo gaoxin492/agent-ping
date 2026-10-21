@@ -7,7 +7,7 @@ Nothing to install on the watch: Apple Watch and most fitness bands already mirr
 
 [中文说明](README.zh-CN.md)
 
-**Contents:** [Install](#install) · [Phone apps](#phone-apps) · [Agents](#agents) · [Settings](#settings) · [Uninstall](#uninstall) · [Privacy](#privacy)
+**Contents:** [Install](#install) · [Several computers](#several-computers-one-phone) · [Phone apps](#phone-apps) · [Agents](#agents) · [Settings](#settings) · [Uninstall](#uninstall) · [Privacy](#privacy)
 
 ## Install
 
@@ -25,6 +25,38 @@ irm https://raw.githubusercontent.com/gaoxin492/agent-ping/main/install.ps1 | ie
 
 The setup asks which phone app to use, sends a test, then hooks up every agent it finds.
 Restart open agent sessions afterwards.
+
+## Several computers, one phone
+
+Install agent-ping on each computer and give them all **the same topic** (ntfy) or **the same key** (Bark). Your phone subscribes once.
+
+1. On a computer that's already set up, look up the topic:
+   ```sh
+   agent-ping status        # channel: ntfy https://ntfy.sh/YOUR-TOPIC
+   ```
+2. On the new computer, run the installer. When it asks for the topic, **don't just press Enter** — paste that topic.
+   Already installed? Switch it:
+   ```sh
+   agent-ping use ntfy YOUR-TOPIC
+   agent-ping use bark https://api.day.app/YOURKEY   # if you use Bark
+   agent-ping test
+   ```
+
+Each notification names the project folder, so you can tell which job finished.
+
+### Windows + WSL
+
+agent-ping only sees agents running **on the same side** it's installed on:
+
+| Your agent runs in… | Install in… | Command |
+|---|---|---|
+| a WSL terminal (Ubuntu etc.) | WSL | `curl -fsSL https://raw.githubusercontent.com/gaoxin492/agent-ping/main/install.sh \| sh` |
+| Windows itself (PowerShell, Cursor, Claude desktop) | PowerShell | `irm https://raw.githubusercontent.com/gaoxin492/agent-ping/main/install.ps1 \| iex` |
+
+Use both? **Install on both** — each side keeps its own config. Give both the same topic as above and they reach the same phone.
+
+- WSL usually can't read keyboard idle time, so the `idle` setting has no effect there: every finished task pings.
+- Agents in WSL keep their config in the Linux home (e.g. `~/.claude`), separate from Windows' `C:\Users\you\.claude`.
 
 ## Phone apps
 
@@ -50,6 +82,18 @@ Switch anytime: `agent-ping use bark https://api.day.app/YOURKEY`
 | Anything else | `agent-ping run -- <command>` pings when the command ends |
 
 `agent-ping install claude` hooks just one agent. `agent-ping status` shows what's hooked.
+
+### Turn an agent's pings on or off
+
+```sh
+agent-ping off codex           # mute Codex
+agent-ping on claude hermes    # unmute Claude Code and Hermes (hooks them if they aren't yet)
+agent-ping off                 # pause everything
+agent-ping on                  # resume everything
+agent-ping status              # see what's on / off
+```
+
+`off` only tells agent-ping to stay quiet — the hooks stay — so it takes effect at once, no agent restart.
 
 ## Settings
 
