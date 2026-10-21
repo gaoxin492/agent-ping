@@ -304,8 +304,8 @@ func cmdSetup() error {
 		c = Channel{Type: "webhook", URL: ask("Webhook URL", "")}
 	default:
 		c = Channel{Type: "ntfy", Server: "https://ntfy.sh", Topic: randomTopic()}
-		c.Server = ask(L("ntfy server", "ntfy 服务器"), c.Server)
-		c.Topic = ask(L("Topic (keep it hard to guess)", "主题名（越难猜越安全）"), c.Topic)
+		c.Server = ask(L("ntfy server (just press Enter unless you run your own)", "ntfy 服务器（没自建服务器就直接回车）"), c.Server)
+		c.Topic = ask(L("Topic (press Enter to keep this random one)", "主题名（直接回车用这个随机名，越难猜越安全）"), c.Topic)
 		fmt.Println()
 		fmt.Println(L("On your phone: install the “ntfy” app → tap + → subscribe to this topic:",
 			"在手机上：安装 “ntfy” App → 点 + → 订阅这个主题："))
