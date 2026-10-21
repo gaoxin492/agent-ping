@@ -16,7 +16,8 @@ import (
 	"time"
 )
 
-// runHook is what the agents call. kind is "<agent>-<event>" (or "codex").
+// runHook is what the agents call. kind is "<agent>-<event>", or plain "codex" for Codex's
+// notify program, which passes its JSON as the last argument instead of on stdin.
 // It must never print junk to stdout or exit non-zero: that could block the agent.
 func runHook(args []string) {
 	if len(args) == 0 {
@@ -24,7 +25,8 @@ func runHook(args []string) {
 	}
 	kind := args[0]
 	agent, event, _ := strings.Cut(kind, "-")
-	if agent == "codex" {
+	codexNotify := kind == "codex"
+	if codexNotify {
 		event = "stop"
 	}
 	// Cursor reads stdout as JSON; answer first so a crash below can't block it.
@@ -38,7 +40,7 @@ func runHook(args []string) {
 	defer func() { recover() }()
 
 	payload := map[string]any{}
-	if agent == "codex" {
+	if codexNotify {
 		if len(args) > 1 {
 			json.Unmarshal([]byte(args[len(args)-1]), &payload)
 		}
@@ -51,7 +53,7 @@ func runHook(args []string) {
 	}
 	cfg, _ := loadConfig()
 	if cfg.isOff(agent) {
-		if agent == "codex" {
+		if codexNotify {
 			runCodexChain(cfg, args[1:])
 		}
 		return
@@ -61,12 +63,14 @@ func runHook(args []string) {
 	case "start":
 		markStart(agent, sessionKey(payload))
 	case "stop":
-		if agent == "codex" {
+		if codexNotify {
 			runCodexChain(cfg, args[1:])
 		}
 		finish(cfg, agent, payload)
 	case "notify":
 		approval(cfg, agent, payload)
+	case "ask":
+		askingYou(cfg, agent, payload)
 	}
 }
 
@@ -150,6 +154,22 @@ func takeStart(agent, key string) (time.Duration, bool) {
 	return time.Since(time.Unix(0, n)), true
 }
 
+// firstForTurn is false if this turn was already reported: the Codex desktop app can call notify
+// twice for one turn. Creating the marker file is atomic, so two racing calls send one ping.
+func firstForTurn(agent string, p map[string]any) bool {
+	turn := unsafeChars.ReplaceAllString(str(p, "turn-id", "turn_id"), "")
+	if turn == "" {
+		return true
+	}
+	os.MkdirAll(stateDir(), 0o700)
+	f, err := os.OpenFile(filepath.Join(stateDir(), agent+"-turn-"+turn), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return !os.IsExist(err)
+	}
+	f.Close()
+	return true
+}
+
 func cleanOldState() {
 	entries, _ := os.ReadDir(stateDir())
 	for _, e := range entries {
@@ -169,8 +189,23 @@ func projectName(p map[string]any) string {
 	if dir == "" {
 		dir, _ = os.Getwd()
 	}
+	if abs, err := filepath.Abs(dir); err == nil { // Codex can report cwd as "."
+		dir = abs
+	}
 	dir = strings.TrimRight(strings.ReplaceAll(dir, "\\", "/"), "/")
-	return filepath.Base(filepath.FromSlash(dir))
+	name := filepath.Base(filepath.FromSlash(dir))
+	if name == "." || name == "/" || name == `\` || dir == "" {
+		return ""
+	}
+	return name
+}
+
+// projectLine is "Project: x", or nothing when the agent didn't say where it ran.
+func projectLine(cfg *Config, p map[string]any) []string {
+	if name := projectName(p); name != "" {
+		return []string{T(cfg, "project", name)}
+	}
+	return nil
 }
 
 // userAway is false when you were at the keyboard recently (if the user asked for that filter).
@@ -183,6 +218,9 @@ func userAway(cfg *Config) bool {
 }
 
 func finish(cfg *Config, agent string, p map[string]any) {
+	if !firstForTurn(agent, p) {
+		return
+	}
 	dur, known := takeStart(agent, sessionKey(p))
 	status := str(p, "status")
 	if status == "aborted" { // you pressed stop yourself, so you're right there
@@ -199,7 +237,7 @@ func finish(cfg *Config, agent string, p map[string]any) {
 	if status == "error" {
 		title = T(cfg, "error", name)
 	}
-	lines := []string{T(cfg, "project", projectName(p))}
+	lines := projectLine(cfg, p)
 	if known {
 		lines = append(lines, T(cfg, "took", fmtDuration(cfg, dur)))
 	}
@@ -220,16 +258,70 @@ func approval(cfg *Config, agent string, p map[string]any) {
 		return
 	}
 	msg := str(p, "message")
+	if ti, ok := p["tool_input"].(map[string]any); ok && msg == "" { // Codex PermissionRequest
+		msg = str(ti, "description")
+	}
 	nt := str(p, "notification_type")
-	// Claude's "waiting for your input" reminder repeats the Stop notification.
-	if nt == "idle_prompt" || strings.Contains(strings.ToLower(msg), "waiting for your input") {
+	// Claude's "waiting for your input" reminder repeats the Stop notification; auth_success isn't a question.
+	if nt == "idle_prompt" || nt == "auth_success" || strings.Contains(strings.ToLower(msg), "waiting for your input") {
 		return
 	}
-	lines := []string{T(cfg, "project", projectName(p))}
+	if askedRecently(agent, sessionKey(p)) { // Claude follows AskUserQuestion with a permission notice
+		return
+	}
+	title := T(cfg, "approve", agentNames[agent])
+	if nt == "elicitation_dialog" { // an MCP server wants you to fill something in
+		title = T(cfg, "ask", agentNames[agent])
+	}
+	lines := projectLine(cfg, p)
 	if msg != "" {
 		lines = append(lines, snippet(msg, 140))
 	}
-	sendAll(cfg, Message{Title: T(cfg, "approve", agentNames[agent]), Body: strings.Join(lines, "\n")})
+	sendAll(cfg, Message{Title: title, Body: strings.Join(lines, "\n")})
+}
+
+// askingYou is for the agent's "ask the user" tool (Claude's AskUserQuestion, Hermes' clarify, Codex's
+// request_user_input): the turn is paused on you, not done. The question itself is only sent
+// with include_text, like replies.
+func askingYou(cfg *Config, agent string, p map[string]any) {
+	if cfg.SkipApproval || !userAway(cfg) {
+		return
+	}
+	os.MkdirAll(stateDir(), 0o700)
+	os.WriteFile(askFile(agent, sessionKey(p)), nil, 0o600)
+	lines := projectLine(cfg, p)
+	if cfg.IncludeText {
+		if q := askedQuestion(p); q != "" {
+			lines = append(lines, snippet(q, 140))
+		}
+	}
+	sendAll(cfg, Message{Title: T(cfg, "ask", agentNames[agent]), Body: strings.Join(lines, "\n")})
+}
+
+func askFile(agent, key string) string { return filepath.Join(stateDir(), agent+"-"+key+".ask") }
+
+// askedRecently reports (once) whether we just sent a "question" ping for this session.
+func askedRecently(agent, key string) bool {
+	f := askFile(agent, key)
+	st, err := os.Stat(f)
+	if err != nil {
+		return false
+	}
+	os.Remove(f)
+	return time.Since(st.ModTime()) < 30*time.Second
+}
+
+func askedQuestion(p map[string]any) string {
+	ti, _ := p["tool_input"].(map[string]any)
+	if ti == nil {
+		ti, _ = p["args"].(map[string]any)
+	}
+	if qs, ok := ti["questions"].([]any); ok && len(qs) > 0 { // Claude, Codex
+		if q, ok := qs[0].(map[string]any); ok {
+			return str(q, "question", "header")
+		}
+	}
+	return str(ti, "question", "prompt")
 }
 
 func snippet(s string, n int) string {
