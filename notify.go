@@ -23,6 +23,9 @@ func sendAll(cfg *Config, m Message) error {
 	if len(cfg.Channels) == 0 {
 		return errors.New(T(cfg, "no_channel"))
 	}
+	if cfg.Machine != "" {
+		m.Body = strings.TrimSpace(m.Body + "\n" + T(cfg, "machine", cfg.Machine))
+	}
 	var errs []string
 	for _, c := range cfg.Channels {
 		if err := send(c, m); err != nil {
