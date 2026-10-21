@@ -1,11 +1,34 @@
-# agent-ping
+<p align="center"><img src="assets/logo.jpg" alt="agent-ping" width="360"></p>
 
-AI 编程助手跑完任务、或者需要你确认时，手机（和手表）会震一下。
+<p align="center"><b>AI Agent 干完活、或者需要你的时候，手机和手表震一下。</b></p>
 
-支持 **Claude Code、Codex、Cursor、Gemini CLI、Hermes**，其他任何命令也可以用 `agent-ping run`。
-手表上不用装任何东西：Apple Watch 和大多数手环本来就会同步手机通知。
+<p align="center">
+Claude Code · Codex · Cursor · Gemini CLI · Hermes<br>
+终端、桌面版、VS Code 插件都行 · macOS · Linux · Windows · WSL
+</p>
 
-**目录：** [安装](#安装) · [多台电脑](#多台电脑共用一个手机) · [手机 App](#手机-app) · [支持的 Agent](#支持的-agent) · [设置](#设置) · [卸载](#卸载) · [隐私](#隐私)
+<p align="center"><a href="README.md">English</a></p>
+
+---
+
+你同时开了好几个 Agent 并行干活，或者暂时离开了办公桌。
+你不想一直盯着屏幕，只希望某个 Agent **做完了**、或者**停下来问你问题**的时候，手腕上轻轻震一下——
+又不想为此去接 Telegram 机器人、搭服务器、注册一堆账号。**只是想收到个通知而已。**
+
+**agent-ping 就是干这个的。** 一个小程序、一行安装命令，之后这些时候手机会震：
+
+- ✅ **Agent 做完了** —— 告诉你是哪个项目、用了多久
+- ⏳ **它要你批准**一条命令
+- ❓ **它在问你问题**，等你回答
+
+用默认的 ntfy（免费）不用机器人、不用服务器、不用注册。手表上也不用装任何东西——
+Apple Watch 和大多数手环本来就会同步手机通知。你的代码和对话内容也不会发出去：通知里只有哪个 Agent、哪个文件夹、用了多久。
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/gaoxin492/agent-ping/main/install.sh | sh
+```
+
+**目录：** [安装](#安装) · [多台电脑](#多台电脑共用一个手机) · [手机 App](#手机-app) · [支持的 Agent](#支持的-agent) · [设置](#设置) · [收不到通知？](#收不到通知) · [卸载](#卸载) · [隐私](#隐私)
 
 ## 安装
 
@@ -76,18 +99,21 @@ agent-ping 只管**和它装在同一边**的 agent：
 |---|---|---|---|
 | Claude Code | ✅ | ✅ | ✅ 选项提问（AskUserQuestion）、MCP 表单 |
 | Codex | ✅ | 见下方说明 | request_user_input（已接上，未实测） |
-| Cursor | ✅（含出错） | — | — |
-| Gemini CLI | ✅ | ✅ | — |
+| Cursor ¹ | ✅（含出错） | — | — |
+| Gemini CLI ¹ | ✅ | ✅ | — |
 | Hermes | ✅ | ✅ | ✅ clarify 提问 |
 | 其他任何工具 | `agent-ping run -- 命令`，命令结束时提醒 | | |
 
-**在哪里用都行：** 同一份 hook 对这些入口都有效，下面这些都实测过——
-终端里的 Claude Code / Codex / Hermes、**Claude 桌面版**、**VS Code 的 Claude Code 插件**、**VS Code 的 Codex 插件**、**ChatGPT 桌面版里的 Codex**。
+¹ 按官方文档的 hook 格式接入，有单元测试，但还没在真机上试过，欢迎反馈。
+
+**在哪里用都行：** 同一份 hook 对这些入口都有效，下面这些都在真机上测过——
+终端里的 Claude Code / Codex / Hermes、**Claude 桌面版**、**VS Code 的 Claude Code 插件**、**VS Code 的 Codex 插件**、**ChatGPT 桌面版里的 Codex**；macOS、Windows、WSL 都测过。
 网页版聊天（claude.ai、chatgpt.com）和 ChatGPT 普通聊天没有开放 hook，无法提醒。
 
 **Codex 说明：** 「完成」用 Codex 的 `notify`，所有版本、所有入口都会调用。
 开始时间、批准、提问用 Codex 新的 hook（`~/.codex/hooks.json`）。Codex 要求先信任 hook 才会运行，agent-ping 安装时会自动写好信任记录，不用你在 `/hooks` 里点。
 「需要你确认」依赖 Codex 在请求批准时调用 `PermissionRequest`：在 Codex 0.162（alpha）上实测还没有触发，更新到更新的版本后会自动生效。
+信任记录按 Codex 自己的算法生成。如果以后 Codex 改了算法，这几个额外的 hook 会变成"未信任"而不再运行（`/hooks` 里能看到），但「完成」提醒不受影响；重新运行一次安装命令，或在 `/hooks` 里点信任即可恢复。
 
 **Hermes 说明：** 只给默认配置（`~/.hermes`）加 hook；如果你用 `hermes profile` 建了多套配置，其他 profile 不提醒。Telegram 等网关、定时任务、子 agent 里的对话也不提醒。
 
@@ -117,6 +143,13 @@ agent-ping set lang en            # 通知改成英文（安装时第一个问�
 ```
 
 通知里的「项目」是 agent 当时所在的文件夹名，例如在 `~/code/my-app` 里跑就显示「项目：my-app」。
+
+## 收不到通知？
+
+- **你正坐在电脑前。** 安装时如果对「你正在用电脑时不提醒？」选了"是"，你打字的时候就不会推送。想一直推送：`agent-ping set idle 0`。
+- **手机震了、手表没震。** 这是苹果的规则：只有 iPhone 锁屏时通知才会转到手表。另外检查 iPhone 上的 Watch App →「通知」→ 你用的推送 App 是否选了"镜像我的 iPhone"。
+- **完全收不到。** 先运行 `agent-ping test`。测试能收到的话，把正在用的 agent 会话重启一下（hook 在会话开始时加载），再用 `agent-ping status` 确认这个 agent 在 *on* 里。
+- **iPhone 上 ntfy 总是慢半拍。** Bark 直接走苹果推送，在 iPhone 上通常更稳：`agent-ping use bark https://api.day.app/你的KEY`。
 
 ## 卸载
 
