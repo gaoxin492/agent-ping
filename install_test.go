@@ -367,7 +367,7 @@ func TestCodexTrustRoundTrip(t *testing.T) {
 	if n := strings.Count(string(got), "[hooks.state."); n != 1+len(codexHookEvents) {
 		t.Fatalf("want user record + %d of ours, got %d:\n%s", len(codexHookEvents), n, got)
 	}
-	key := `[hooks.state."` + filepath.Join(dir, "hooks.json") + `:pre_tool_use:0:0"]`
+	key := "[hooks.state." + tomlString(filepath.Join(dir, "hooks.json")+":pre_tool_use:0:0") + "]"
 	if !strings.Contains(string(got), key) {
 		t.Fatalf("missing %s:\n%s", key, got)
 	}
