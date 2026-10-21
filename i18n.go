@@ -22,6 +22,8 @@ var texts = map[string][2]string{ // {en, zh}
 	"notfound":     {"- %s: not found, skipped", "- %s：没找到，跳过"},
 	"failed":       {"✗ %s: %v", "✗ %s：%v"},
 	"restart":      {"Restart any open agent sessions so they load the new hooks.", "已经开着的 agent 会话需要重启一下才会生效。"},
+	"ask":          {"❓ %s is asking you something", "❓ %s 在问你问题"},
+	"machine":      {"Computer: %s", "电脑：%s"},
 	"switched_on":  {"🔔 %s: on", "🔔 %s：已开启提醒"},
 	"switched_off": {"🔕 %s: off (hooks kept; agent-ping on to resume)", "🔕 %s：已关闭提醒（hook 保留，agent-ping on 即可恢复）"},
 	"codex_chain":  {"  (Codex already had a notify program; agent-ping will keep calling it.)", "  （Codex 原来已有 notify 程序，agent-ping 会继续调用它。）"},
